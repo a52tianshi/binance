@@ -26,7 +26,7 @@ func setupLogger() {
 		MaxAge:     30,    // 最多保留30天
 		Compress:   true,
 	})
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmicroseconds)
 }
 
 // 定义响应数据结构
@@ -119,12 +119,39 @@ func fetchPageRaw(apiKey, secretKey, optionType, coin string, pageIndex int) (st
 	return string(body), nil
 }
 
+func fetchPrice(symbol string) (string, error) {
+	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%s", symbol)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return string(body), nil
+}
+
 var apiKey, secretKey string
 
 func runFullScrape() {
 
 	coins := []string{"BTC", "ETH", "WBETH"}
 	optionTypes := []string{"PUT", "CALL"}
+	symbols := []string{"BTCUSDT", "ETHUSDT", "WBETHUSDT"}
+
+	for _, sym := range symbols {
+		rawData, err := fetchPrice(sym)
+		if err != nil {
+			log.Printf("获取 %s 价格失败: %v\n", sym, err)
+			continue
+		}
+		log.Printf("获取 %s 价格成功: %s\n", sym, rawData)
+	}
 
 	for _, coin := range coins {
 		for _, optionType := range optionTypes {
@@ -149,6 +176,15 @@ func runFullScrape() {
 
 			}
 		}
+	}
+
+	for _, sym := range symbols {
+		rawData, err := fetchPrice(sym)
+		if err != nil {
+			log.Printf("获取 %s 价格失败: %v\n", sym, err)
+			continue
+		}
+		log.Printf("获取 %s 价格成功: %s\n", sym, rawData)
 	}
 }
 
