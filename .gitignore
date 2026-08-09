@@ -4,3 +4,4 @@ main
 *.xlsx
 *.csv
 *.png
+.env

@@ -107,7 +107,30 @@ func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger) error 
 	return nil
 }
 
+func loadDotEnv(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // no .env file is fine; real env vars may already be set
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		val := strings.TrimSpace(kv[1])
+		if _, exists := os.LookupEnv(key); !exists {
+			os.Setenv(key, val)
+		}
+	}
+}
+
 func main() {
+	loadDotEnv(".env")
 	cfg, err := LoadConfig(os.Args[1:], os.Getenv)
 	if err != nil {
 		log.Fatalf("config error: %v", err)
