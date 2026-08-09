@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -38,6 +39,7 @@ func (c *Client) DoPrivate(method, path string, query url.Values, body interface
 }
 
 func (c *Client) do(method, path string, query url.Values, body interface{}, out interface{}, signed bool) error {
+	method = strings.ToUpper(method)
 	requestPath := path
 	if len(query) > 0 {
 		requestPath = path + "?" + query.Encode()

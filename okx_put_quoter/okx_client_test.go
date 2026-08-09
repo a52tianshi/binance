@@ -86,3 +86,41 @@ func TestDoPrivate_APIErrorReturned(t *testing.T) {
 		t.Fatalf("expected error for non-zero code")
 	}
 }
+
+func TestDoPrivate_NormalizesLowercaseMethod(t *testing.T) {
+	cfg := Config{APIKey: "key123", APISecret: "secret123", APIPassphrase: "pass123"}
+
+	var gotMethod string
+	var gotSign string
+	var gotTs string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotSign = r.Header.Get("OK-ACCESS-SIGN")
+		gotTs = r.Header.Get("OK-ACCESS-TIMESTAMP")
+		w.Write([]byte(`{"code":"0","msg":"","data":[{"result":true}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(cfg, srv.URL)
+	var out []map[string]bool
+	// Pass method as lowercase "get" - should be normalized to "GET" in both HTTP request and signature
+	err := c.DoPrivate("get", "/api/v5/test", nil, nil, &out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the actual HTTP request used uppercase method
+	if gotMethod != "GET" {
+		t.Fatalf("expected HTTP method to be normalized to GET, got %s", gotMethod)
+	}
+
+	// Verify the signature was computed with uppercase method
+	requestPath := "/api/v5/test"
+	preHash := gotTs + "GET" + requestPath
+	mac := hmac.New(sha256.New, []byte(cfg.APISecret))
+	mac.Write([]byte(preHash))
+	expectedSign := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	if gotSign != expectedSign {
+		t.Fatalf("signature mismatch with uppercase method in preHash: got %s want %s", gotSign, expectedSign)
+	}
+}
