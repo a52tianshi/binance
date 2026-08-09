@@ -44,7 +44,29 @@ func AmendOrder(c *Client, instId, ordId string, newPx decimal.Decimal) error {
 	return nil
 }
 
-func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger) error {
+// AmendTracker remembers the last price we actually sent for each ordId.
+// amend-order is processed asynchronously by OKX, so the next poll's
+// orders-pending snapshot may still report the pre-amend price while the book
+// already reflects the new one. Re-sending the same price in that window would
+// cost queue priority for nothing.
+type AmendTracker struct {
+	lastSent map[string]decimal.Decimal
+}
+
+func NewAmendTracker() *AmendTracker {
+	return &AmendTracker{lastSent: make(map[string]decimal.Decimal)}
+}
+
+func (t *AmendTracker) AlreadySent(ordId string, px decimal.Decimal) bool {
+	last, ok := t.lastSent[ordId]
+	return ok && last.Equal(px)
+}
+
+func (t *AmendTracker) Record(ordId string, px decimal.Decimal) {
+	t.lastSent[ordId] = px
+}
+
+func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger, tracker *AmendTracker) error {
 	orders, err := FetchOpenEthPutSellOrders(c)
 	if err != nil {
 		return err
@@ -72,21 +94,11 @@ func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger) error 
 			logger.Printf("ERROR %s: fetch mark price: %v", instId, err)
 			continue
 		}
-		refPx := order.Px
-		if book.Ask1 != nil {
-			refPx = book.Ask1.Px
-		}
-		tickSz, err := FindTickSize(bands, refPx)
-		if err != nil {
-			logger.Printf("ERROR %s: find tick size: %v", instId, err)
-			continue
-		}
-
 		decision := DecideNewPrice(QuoteInput{
 			OurPx:  order.Px,
 			OurSz:  order.RemainingSz(),
 			MarkPx: markPx,
-			TickSz: tickSz,
+			Bands:  bands,
 			Ask1:   book.Ask1,
 			Ask2:   book.Ask2,
 		})
@@ -98,10 +110,15 @@ func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger) error 
 			logger.Printf("[DRY-RUN] %s: reason=%s %s -> %s", instId, decision.Reason, order.Px, decision.NewPx)
 			continue
 		}
+		if tracker.AlreadySent(order.OrdId, decision.NewPx) {
+			logger.Printf("SKIP %s: amend to %s already sent (awaiting fresh snapshot)", instId, decision.NewPx)
+			continue
+		}
 		if err := AmendOrder(c, instId, order.OrdId, decision.NewPx); err != nil {
 			logger.Printf("ERROR %s: amend order: %v", instId, err)
 			continue
 		}
+		tracker.Record(order.OrdId, decision.NewPx)
 		logger.Printf("%s: reason=%s %s -> %s", instId, decision.Reason, order.Px, decision.NewPx)
 	}
 	return nil
@@ -139,17 +156,19 @@ func main() {
 	logger := log.New(os.Stdout, "", log.LstdFlags)
 	client := NewClient(cfg, "https://www.okx.com")
 	cache := NewTickCache()
+	// One tracker for the life of the process, shared by every poll pass.
+	tracker := NewAmendTracker()
 
 	logger.Printf("starting okx_put_quoter: dry_run=%v interval=%v", cfg.DryRun, cfg.PollInterval)
 
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 
-	if err := runOnce(client, cache, cfg, logger); err != nil {
+	if err := runOnce(client, cache, cfg, logger, tracker); err != nil {
 		logger.Printf("ERROR poll pass: %v", err)
 	}
 	for range ticker.C {
-		if err := runOnce(client, cache, cfg, logger); err != nil {
+		if err := runOnce(client, cache, cfg, logger, tracker); err != nil {
 			logger.Printf("ERROR poll pass: %v", err)
 		}
 	}

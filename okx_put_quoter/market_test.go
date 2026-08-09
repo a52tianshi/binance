@@ -79,6 +79,37 @@ func TestFetchOrderBook_ParsesTwoAsks(t *testing.T) {
 	}
 }
 
+func TestFetchOrderBook_ParsesNumOrders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"0","msg":"","data":[{"asks":[["0.10","3","0","1"],["0.12","7","0","4"]],"bids":[],"ts":"1","seqId":1}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{}, srv.URL)
+	book, err := FetchOrderBook(c, "X")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if book.Ask1 == nil || book.Ask1.NumOrders != 1 {
+		t.Fatalf("expected ask1 numOrders 1, got %+v", book.Ask1)
+	}
+	if book.Ask2 == nil || book.Ask2.NumOrders != 4 {
+		t.Fatalf("expected ask2 numOrders 4, got %+v", book.Ask2)
+	}
+}
+
+func TestFetchOrderBook_BadNumOrders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"0","msg":"","data":[{"asks":[["0.10","3","0","abc"]],"bids":[],"ts":"1","seqId":1}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{}, srv.URL)
+	if _, err := FetchOrderBook(c, "X"); err == nil {
+		t.Fatalf("expected error for unparseable numOrders")
+	}
+}
+
 func TestFetchMarkPrice(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"code":"0","msg":"","data":[{"instId":"X","instType":"OPTION","markPx":"0.1144782725373311","ts":"1"}]}`))

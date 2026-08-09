@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 
 	"github.com/shopspring/decimal"
 )
@@ -65,6 +66,9 @@ func FindTickSize(bands []TickBand, px decimal.Decimal) (decimal.Decimal, error)
 type BookLevel struct {
 	Px decimal.Decimal
 	Sz decimal.Decimal
+	// NumOrders is the 4th element of an OKX book row ([price, size, "0", numOrders]).
+	// It is 0 when the row is shorter than 4 elements.
+	NumOrders int
 }
 
 type OrderBook struct {
@@ -89,7 +93,15 @@ func parseLevel(row []string) (*BookLevel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse level size %q: %w", row[1], err)
 	}
-	return &BookLevel{Px: px, Sz: sz}, nil
+	lvl := &BookLevel{Px: px, Sz: sz}
+	if len(row) >= 4 {
+		numOrders, err := strconv.Atoi(row[3])
+		if err != nil {
+			return nil, fmt.Errorf("parse level numOrders %q: %w", row[3], err)
+		}
+		lvl.NumOrders = numOrders
+	}
+	return lvl, nil
 }
 
 func FetchOrderBook(c *Client, instId string) (OrderBook, error) {

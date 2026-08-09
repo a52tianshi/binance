@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -30,6 +32,82 @@ func TestFetchOpenEthPutSellOrders_FiltersCorrectly(t *testing.T) {
 	}
 	if orders[0].OrdId != "1" {
 		t.Fatalf("unexpected order matched: %+v", orders[0])
+	}
+}
+
+func TestFetchOpenEthPutSellOrders_Paginates(t *testing.T) {
+	var afterParams []string
+	calls := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		afterParams = append(afterParams, r.URL.Query().Get("after"))
+		if got := r.URL.Query().Get("limit"); got != "100" {
+			t.Errorf("expected limit=100, got %q", got)
+		}
+
+		var rows []string
+		if calls == 1 {
+			// A full page of 100 raw rows; all of them match the filter.
+			for i := 0; i < ordersPendingPageSize; i++ {
+				rows = append(rows, fmt.Sprintf(
+					`{"instId":"ETH-USD-260810-1700-P","ordId":"%d","side":"sell","optType":"P","px":"0.10","sz":"5","accFillSz":"0"}`, i+1))
+			}
+		} else {
+			rows = append(rows,
+				`{"instId":"ETH-USD-260810-1800-P","ordId":"101","side":"sell","optType":"P","px":"0.11","sz":"5","accFillSz":"0"}`)
+		}
+		w.Write([]byte(`{"code":"0","msg":"","data":[` + strings.Join(rows, ",") + `]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{}, srv.URL)
+	orders, err := FetchOpenEthPutSellOrders(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 paginated calls, got %d", calls)
+	}
+	if afterParams[0] != "" {
+		t.Fatalf("expected no after param on the first call, got %q", afterParams[0])
+	}
+	if afterParams[1] != "100" {
+		t.Fatalf("expected after=100 (last ordId of page 1) on the second call, got %q", afterParams[1])
+	}
+	if len(orders) != ordersPendingPageSize+1 {
+		t.Fatalf("expected %d orders across both pages, got %d", ordersPendingPageSize+1, len(orders))
+	}
+	if orders[len(orders)-1].OrdId != "101" {
+		t.Fatalf("expected the page-2 order to be included, got %+v", orders[len(orders)-1])
+	}
+}
+
+func TestFetchOpenEthPutSellOrders_StopsOnEmptyPage(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var rows []string
+		if calls == 1 {
+			for i := 0; i < ordersPendingPageSize; i++ {
+				rows = append(rows, fmt.Sprintf(
+					`{"instId":"BTC-USD-260810-30000-P","ordId":"%d","side":"sell","optType":"P","px":"1","sz":"1","accFillSz":"0"}`, i+1))
+			}
+		}
+		w.Write([]byte(`{"code":"0","msg":"","data":[` + strings.Join(rows, ",") + `]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{}, srv.URL)
+	orders, err := FetchOpenEthPutSellOrders(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected the loop to stop after the empty second page, got %d calls", calls)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("expected no ETH put sells, got %d", len(orders))
 	}
 }
 
