@@ -17,6 +17,7 @@ found for the same instId, that instId is skipped with a warning.
 ## Setup
 
 ```bash
+cd okx_put_quoter
 cp .env.example .env
 # edit .env with real OKX_API_KEY / OKX_API_SECRET / OKX_API_PASSPHRASE
 ```
@@ -24,8 +25,8 @@ cp .env.example .env
 ## Run
 
 ```bash
-# from repo root
-go run ./okx_put_quoter --dry-run --interval 5
+cd okx_put_quoter
+go run . --dry-run --interval 5
 ```
 
 Drop `--dry-run` once you've confirmed the logged decisions look correct.
