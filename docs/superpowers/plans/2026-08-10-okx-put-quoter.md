@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Only ETH options: filter `instId` with prefix `ETH-`.
+- All option underlyings: filter by `optType=P` and `side=sell` only, no underlying restriction. (Updated 2026-08-10: the original constraint below restricted this to ETH-prefixed instIds only; that restriction was intentionally removed per user request so the tool now handles PUT sell orders on any underlying, e.g. BTC, SOL. Original constraint, kept for historical record: "Only ETH options: filter `instId` with prefix `ETH-`.")
 - Only `optType=P` (put) and `side=sell` orders.
 - Assume at most one of our open orders per `instId`; if more than one is found, log a warning and skip that `instId` entirely (do not amend).
 - Tick size per `instId` is fetched from `GET /api/v5/public/instrument-tick-bands` **once per instId**, then cached in memory for the life of the process (verified live: response shape is `{"data":[{"instFamily":"...","tickBand":[{"minPx":"0","maxPx":"0.005","tickSz":"0.0001"},{"minPx":"0.005","maxPx":"10000000","tickSz":"0.0005"}]}]}`).

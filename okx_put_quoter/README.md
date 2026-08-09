@@ -1,7 +1,9 @@
 # okx_put_quoter
 
-Polls the OKX account's open ETH PUT sell options every N seconds and
-automatically amends their price:
+Polls the OKX account's open PUT sell option orders across all underlyings
+(ETH, BTC, SOL, etc.) every N seconds and automatically amends their price.
+Examples below use `ETH-USD-260810-1700-P`, but any underlying works the
+same way:
 
 - If our order is not the best ask (ask1) and ask1 is above mark price,
   move our price **down** to ask1 so we join the best ask. (Our order is a

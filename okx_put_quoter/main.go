@@ -67,7 +67,7 @@ func (t *AmendTracker) Record(ordId string, px decimal.Decimal) {
 }
 
 func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger, tracker *AmendTracker) error {
-	orders, err := FetchOpenEthPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c)
 	if err != nil {
 		return err
 	}

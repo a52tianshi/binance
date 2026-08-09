@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/shopspring/decimal"
 )
@@ -34,10 +33,10 @@ type pendingOrderResp struct {
 // ordersPendingPageSize is OKX's maximum page size for orders-pending.
 const ordersPendingPageSize = 100
 
-// FetchOpenEthPutSellOrders walks every page of orders-pending (OKX caps a page
+// FetchOpenPutSellOrders walks every page of orders-pending (OKX caps a page
 // at 100 rows; further pages are requested with after=<last ordId>) and returns
-// the ETH put sell orders across all of them.
-func FetchOpenEthPutSellOrders(c *Client) ([]PendingOrder, error) {
+// the put sell orders across all of them, for any option underlying.
+func FetchOpenPutSellOrders(c *Client) ([]PendingOrder, error) {
 	var result []PendingOrder
 	after := ""
 
@@ -59,7 +58,7 @@ func FetchOpenEthPutSellOrders(c *Client) ([]PendingOrder, error) {
 		}
 
 		for _, r := range raw {
-			if r.Side != "sell" || r.OptType != "P" || !strings.HasPrefix(r.InstId, "ETH-") {
+			if r.Side != "sell" || r.OptType != "P" {
 				continue
 			}
 			px, err := decimal.NewFromString(r.Px)

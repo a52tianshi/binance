@@ -10,7 +10,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func TestFetchOpenEthPutSellOrders_FiltersCorrectly(t *testing.T) {
+func TestFetchOpenPutSellOrders_FiltersCorrectly(t *testing.T) {
 	body := `{"code":"0","msg":"","data":[
 		{"instId":"ETH-USD-260810-1700-P","ordId":"1","side":"sell","optType":"P","px":"0.10","sz":"5","accFillSz":"0"},
 		{"instId":"ETH-USD-260810-1700-C","ordId":"2","side":"sell","optType":"C","px":"0.20","sz":"5","accFillSz":"0"},
@@ -23,19 +23,23 @@ func TestFetchOpenEthPutSellOrders_FiltersCorrectly(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Config{}, srv.URL)
-	orders, err := FetchOpenEthPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(orders) != 1 {
-		t.Fatalf("expected 1 matching order, got %d: %+v", len(orders), orders)
+	// Order 1 (ETH put sell) and order 4 (BTC put sell) both match now that
+	// the underlying restriction is gone; order 2 (call) and order 3 (buy)
+	// are still filtered out.
+	if len(orders) != 2 {
+		t.Fatalf("expected 2 matching orders, got %d: %+v", len(orders), orders)
 	}
-	if orders[0].OrdId != "1" {
-		t.Fatalf("unexpected order matched: %+v", orders[0])
+	gotIds := map[string]bool{orders[0].OrdId: true, orders[1].OrdId: true}
+	if !gotIds["1"] || !gotIds["4"] {
+		t.Fatalf("expected orders 1 (ETH) and 4 (BTC) to match, got: %+v", orders)
 	}
 }
 
-func TestFetchOpenEthPutSellOrders_Paginates(t *testing.T) {
+func TestFetchOpenPutSellOrders_Paginates(t *testing.T) {
 	var afterParams []string
 	calls := 0
 
@@ -62,7 +66,7 @@ func TestFetchOpenEthPutSellOrders_Paginates(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Config{}, srv.URL)
-	orders, err := FetchOpenEthPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,15 +87,18 @@ func TestFetchOpenEthPutSellOrders_Paginates(t *testing.T) {
 	}
 }
 
-func TestFetchOpenEthPutSellOrders_StopsOnEmptyPage(t *testing.T) {
+func TestFetchOpenPutSellOrders_StopsOnEmptyPage(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		var rows []string
 		if calls == 1 {
+			// A full page of non-matching rows (buy side), so this test
+			// exercises the pagination-stop mechanics independently of the
+			// side/optType filter.
 			for i := 0; i < ordersPendingPageSize; i++ {
 				rows = append(rows, fmt.Sprintf(
-					`{"instId":"BTC-USD-260810-30000-P","ordId":"%d","side":"sell","optType":"P","px":"1","sz":"1","accFillSz":"0"}`, i+1))
+					`{"instId":"BTC-USD-260810-30000-P","ordId":"%d","side":"buy","optType":"P","px":"1","sz":"1","accFillSz":"0"}`, i+1))
 			}
 		}
 		w.Write([]byte(`{"code":"0","msg":"","data":[` + strings.Join(rows, ",") + `]}`))
@@ -99,7 +106,7 @@ func TestFetchOpenEthPutSellOrders_StopsOnEmptyPage(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Config{}, srv.URL)
-	orders, err := FetchOpenEthPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +114,7 @@ func TestFetchOpenEthPutSellOrders_StopsOnEmptyPage(t *testing.T) {
 		t.Fatalf("expected the loop to stop after the empty second page, got %d calls", calls)
 	}
 	if len(orders) != 0 {
-		t.Fatalf("expected no ETH put sells, got %d", len(orders))
+		t.Fatalf("expected no matching put sells, got %d", len(orders))
 	}
 }
 
