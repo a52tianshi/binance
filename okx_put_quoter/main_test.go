@@ -37,6 +37,19 @@ func TestAmendOrder_SendsExpectedBody(t *testing.T) {
 	}
 }
 
+func TestAmendOrder_RejectedByPerItemSCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"0","msg":"","data":[{"sCode":"51503","sMsg":"order not found or completed"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{APIKey: "k", APISecret: "s", APIPassphrase: "p"}, srv.URL)
+	err := AmendOrder(c, "ETH-USD-260810-1700-P", "42", decimal.RequireFromString("0.1095"))
+	if err == nil {
+		t.Fatalf("expected error for rejected amend, got nil")
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (func() bool {
 		for i := 0; i+len(needle) <= len(haystack); i++ {

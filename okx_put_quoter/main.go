@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -23,10 +24,24 @@ type amendOrderReq struct {
 	NewPx  string `json:"newPx"`
 }
 
+type amendOrderResult struct {
+	SCode string `json:"sCode"`
+	SMsg  string `json:"sMsg"`
+}
+
 func AmendOrder(c *Client, instId, ordId string, newPx decimal.Decimal) error {
 	req := amendOrderReq{InstId: instId, OrdId: ordId, NewPx: newPx.String()}
-	var out []map[string]interface{}
-	return c.DoPrivate("POST", "/api/v5/trade/amend-order", nil, req, &out)
+	var out []amendOrderResult
+	if err := c.DoPrivate("POST", "/api/v5/trade/amend-order", nil, req, &out); err != nil {
+		return err
+	}
+	if len(out) == 0 {
+		return fmt.Errorf("amend-order: empty response for ordId=%s", ordId)
+	}
+	if out[0].SCode != "0" {
+		return fmt.Errorf("amend-order rejected: sCode=%s sMsg=%s", out[0].SCode, out[0].SMsg)
+	}
+	return nil
 }
 
 func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger) error {
