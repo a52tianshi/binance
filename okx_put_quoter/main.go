@@ -67,14 +67,18 @@ func (t *AmendTracker) Record(ordId string, px decimal.Decimal) {
 }
 
 func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger, tracker *AmendTracker) error {
-	orders, err := FetchOpenPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c, logger)
 	if err != nil {
 		return err
 	}
 
-	for instId, group := range GroupByInstId(orders) {
+	groups := GroupByInstId(orders)
+	var skippedMulti, noAction, amended, errored int
+
+	for instId, group := range groups {
 		if len(group) > 1 {
 			logger.Printf("WARN %s: found %d open put-sell orders, expected at most 1, skipping", instId, len(group))
+			skippedMulti++
 			continue
 		}
 		order := group[0]
@@ -82,16 +86,19 @@ func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger, tracke
 		bands, err := cache.Get(c, instFamilyFor(instId))
 		if err != nil {
 			logger.Printf("ERROR %s: fetch tick bands: %v", instId, err)
+			errored++
 			continue
 		}
 		book, err := FetchOrderBook(c, instId)
 		if err != nil {
 			logger.Printf("ERROR %s: fetch order book: %v", instId, err)
+			errored++
 			continue
 		}
 		markPx, err := FetchMarkPrice(c, instId)
 		if err != nil {
 			logger.Printf("ERROR %s: fetch mark price: %v", instId, err)
+			errored++
 			continue
 		}
 		decision := DecideNewPrice(QuoteInput{
@@ -103,11 +110,13 @@ func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger, tracke
 			Ask2:   book.Ask2,
 		})
 		if !decision.ShouldAmend {
+			noAction++
 			continue
 		}
 
 		if cfg.DryRun {
 			logger.Printf("[DRY-RUN] %s: reason=%s %s -> %s", instId, decision.Reason, order.Px, decision.NewPx)
+			amended++
 			continue
 		}
 		if tracker.AlreadySent(order.OrdId, decision.NewPx) {
@@ -116,11 +125,16 @@ func runOnce(c *Client, cache *TickCache, cfg Config, logger *log.Logger, tracke
 		}
 		if err := AmendOrder(c, instId, order.OrdId, decision.NewPx); err != nil {
 			logger.Printf("ERROR %s: amend order: %v", instId, err)
+			errored++
 			continue
 		}
 		tracker.Record(order.OrdId, decision.NewPx)
 		logger.Printf("%s: reason=%s %s -> %s", instId, decision.Reason, order.Px, decision.NewPx)
+		amended++
 	}
+
+	logger.Printf("poll complete: orders=%d instIds=%d amended=%d no_action=%d skipped_multi=%d errors=%d",
+		len(orders), len(groups), amended, noAction, skippedMulti, errored)
 	return nil
 }
 

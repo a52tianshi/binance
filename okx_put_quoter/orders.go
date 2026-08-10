@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/shopspring/decimal"
 )
@@ -33,16 +35,44 @@ type pendingOrderResp struct {
 // ordersPendingPageSize is OKX's maximum page size for orders-pending.
 const ordersPendingPageSize = 100
 
+// ordersPendingOrdTypes lists every ordType we want returned. Omitting
+// ordType entirely risks OKX only returning a default subset of order
+// types, silently excluding advanced limit variants (post-only, FOK, IOC,
+// market-maker-protection, etc.) that this bot must still manage.
+const ordersPendingOrdTypes = "market,limit,post_only,fok,ioc,optimal_limit_ioc,mmp_and_post_only,elp,rpi"
+
+// optTypeFromInstId derives the option type (C or P) from the instId itself
+// rather than trusting the response's optType field, which has been observed
+// to come back empty for orders-pending rows in practice even though
+// instType=OPTION was requested. Option instIds are always formatted
+// {underlying}-{quote}-{expiry}-{strike}-{C|P}, so the last "-"-separated
+// segment is authoritative.
+func optTypeFromInstId(instId string) string {
+	idx := strings.LastIndex(instId, "-")
+	if idx == -1 || idx == len(instId)-1 {
+		return ""
+	}
+	return instId[idx+1:]
+}
+
 // FetchOpenPutSellOrders walks every page of orders-pending (OKX caps a page
 // at 100 rows; further pages are requested with after=<last ordId>) and returns
 // the put sell orders across all of them, for any option underlying.
-func FetchOpenPutSellOrders(c *Client) ([]PendingOrder, error) {
+//
+// It also logs a one-line diagnostic summary of every raw row seen before
+// filtering (grouped by side/optType), so a mismatch between "what OKX
+// returns" and "what we expected" is visible without adding a separate
+// debug flag.
+func FetchOpenPutSellOrders(c *Client, logger *log.Logger) ([]PendingOrder, error) {
 	var result []PendingOrder
 	after := ""
+	rawTotal := 0
+	tally := make(map[string]int)
 
 	for {
 		q := url.Values{
 			"instType": {"OPTION"},
+			"ordType":  {ordersPendingOrdTypes},
 			"limit":    {strconv.Itoa(ordersPendingPageSize)},
 		}
 		if after != "" {
@@ -56,9 +86,15 @@ func FetchOpenPutSellOrders(c *Client) ([]PendingOrder, error) {
 		if len(raw) == 0 {
 			break
 		}
+		rawTotal += len(raw)
 
 		for _, r := range raw {
-			if r.Side != "sell" || r.OptType != "P" {
+			optType := r.OptType
+			if optType == "" {
+				optType = optTypeFromInstId(r.InstId)
+			}
+			tally[r.Side+"/"+optType]++
+			if r.Side != "sell" || optType != "P" {
 				continue
 			}
 			px, err := decimal.NewFromString(r.Px)
@@ -90,6 +126,7 @@ func FetchOpenPutSellOrders(c *Client) ([]PendingOrder, error) {
 		after = next
 	}
 
+	logger.Printf("orders-pending: raw_rows=%d by_side_optType=%v matched_put_sell=%d", rawTotal, tally, len(result))
 	return result, nil
 }
 

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +11,10 @@ import (
 
 	"github.com/shopspring/decimal"
 )
+
+func discardLogger() *log.Logger {
+	return log.New(io.Discard, "", 0)
+}
 
 func TestFetchOpenPutSellOrders_FiltersCorrectly(t *testing.T) {
 	body := `{"code":"0","msg":"","data":[
@@ -23,7 +29,7 @@ func TestFetchOpenPutSellOrders_FiltersCorrectly(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Config{}, srv.URL)
-	orders, err := FetchOpenPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c, discardLogger())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -36,6 +42,48 @@ func TestFetchOpenPutSellOrders_FiltersCorrectly(t *testing.T) {
 	gotIds := map[string]bool{orders[0].OrdId: true, orders[1].OrdId: true}
 	if !gotIds["1"] || !gotIds["4"] {
 		t.Fatalf("expected orders 1 (ETH) and 4 (BTC) to match, got: %+v", orders)
+	}
+}
+
+func TestFetchOpenPutSellOrders_DerivesOptTypeFromInstIdWhenFieldIsEmpty(t *testing.T) {
+	// Reproduces a real OKX response: instType=OPTION rows can come back with
+	// optType=="" even though the instId itself encodes C/P in its last
+	// segment. The filter must not silently drop every row in that case.
+	body := `{"code":"0","msg":"","data":[
+		{"instId":"ETH-USD-260810-1700-P","ordId":"1","side":"sell","optType":"","px":"0.10","sz":"5","accFillSz":"0"},
+		{"instId":"ETH-USD-260810-1700-C","ordId":"2","side":"sell","optType":"","px":"0.20","sz":"5","accFillSz":"0"},
+		{"instId":"BTC-USD-260810-30000-P","ordId":"3","side":"buy","optType":"","px":"1.0","sz":"1","accFillSz":"0"}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{}, srv.URL)
+	orders, err := FetchOpenPutSellOrders(c, discardLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("expected 1 matching order (ETH put sell), got %d: %+v", len(orders), orders)
+	}
+	if orders[0].OrdId != "1" {
+		t.Fatalf("expected order 1 to match, got: %+v", orders[0])
+	}
+}
+
+func TestOptTypeFromInstId(t *testing.T) {
+	cases := map[string]string{
+		"ETH-USD-260810-1700-P":   "P",
+		"ETH-USD-260810-1700-C":   "C",
+		"BTC-USD-260810-30000-P":  "P",
+		"malformed-no-dash-here-": "",
+		"":                        "",
+	}
+	for instId, want := range cases {
+		if got := optTypeFromInstId(instId); got != want {
+			t.Errorf("optTypeFromInstId(%q) = %q, want %q", instId, got, want)
+		}
 	}
 }
 
@@ -66,7 +114,7 @@ func TestFetchOpenPutSellOrders_Paginates(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Config{}, srv.URL)
-	orders, err := FetchOpenPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c, discardLogger())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +154,7 @@ func TestFetchOpenPutSellOrders_StopsOnEmptyPage(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(Config{}, srv.URL)
-	orders, err := FetchOpenPutSellOrders(c)
+	orders, err := FetchOpenPutSellOrders(c, discardLogger())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
